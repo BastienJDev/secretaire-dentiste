@@ -345,9 +345,26 @@ GET https://VOTRE-URL-RAILWAY.up.railway.app/info/categories
 
 ---
 
+## Statut des actions API
+
+| Action | Status | Notes |
+|--------|--------|-------|
+| consulter_disponibilites | ✅ OK | Retourne les créneaux disponibles |
+| creer_rdv | ✅ OK | Crée et confirme le RDV |
+| rechercher_patient | ✅ OK | Retourne patient_id si trouvé |
+| voir_rdv_patient | ✅ OK | Liste les RDV du patient |
+| annuler_rdv | ✅ OK | Annule un RDV existant |
+| info_horaires | ✅ OK | Données locales |
+| info_types_rdv | ✅ OK | Données locales |
+| suggerer_type_rdv | ✅ OK | Suggère le type selon motif |
+
+---
+
 ## Notes importantes
 
 - **API Key** : Stockée en variable d'environnement sur Railway, pas besoin de la passer dans les headers Synthflow
 - **Office Code** : Également en variable d'environnement
 - **Dates** : L'API accepte les formats YYYY-MM-DD et JJ/MM/AAAA (conversion automatique)
 - **Praticien ID** : Par défaut "MC" (Dr Marie-Hélène CHRETIEN-FRANCESCHINI)
+- **Créneaux** : Toujours consulter les disponibilités AVANT de créer un RDV pour avoir un créneau valide
+- **Format heure** : HHMM (ex: "0930" pour 09h30, "1430" pour 14h30)
