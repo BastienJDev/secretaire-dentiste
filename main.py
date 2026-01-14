@@ -393,6 +393,45 @@ async def root():
     return {"status": "ok", "service": "Secrétaire IA Dentiste"}
 
 
+@app.get("/debug/slots/{type_rdv}")
+async def debug_slots(
+    type_rdv: str,
+    start: str = "2026-01-15",
+    end: str = "2026-01-22",
+    office_code: str = Header(default=DEFAULT_OFFICE_CODE, alias="X-Office-Code"),
+    api_key: Optional[str] = Header(default=None, alias="X-Api-Key")
+):
+    """Debug: voir la réponse brute de l'API rdvdentiste pour les slots"""
+    effective_api_key = api_key or DEFAULT_API_KEY
+
+    # D'abord récupérer le scheduleId
+    schedules_response = await call_rdvdentiste("GET", "/schedules", office_code, api_key)
+    schedules = schedules_response.get("Schedules", [])
+    schedule_id = schedules[0].get("id") if schedules else "unknown"
+
+    # Construire l'URL exacte
+    endpoint = f"/schedules/{schedule_id}/slots/{type_rdv}/"
+    params = {"start": start, "end": end, "newPatient": "1"}
+
+    url = f"{RDVDENTISTE_BASE_URL}{endpoint}"
+    headers = {
+        "OfficeCode": office_code,
+        "Content-Type": "application/json"
+    }
+    if effective_api_key:
+        headers["ApiKey"] = effective_api_key
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers, params=params)
+        return {
+            "url_called": str(response.url),
+            "schedule_id": schedule_id,
+            "status_code": response.status_code,
+            "response_raw": response.text,
+            "headers_sent": {k: v for k, v in headers.items() if k != "ApiKey"}
+        }
+
+
 @app.get("/praticiens")
 async def lister_praticiens(
     office_code: str = Header(default=DEFAULT_OFFICE_CODE, alias="X-Office-Code"),
