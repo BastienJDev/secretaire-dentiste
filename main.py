@@ -605,11 +605,21 @@ async def creer_rdv(
     is_confirmed = result.get("done", False)
     rdv_id = result.get("rdvId") or result.get("idDemande")
 
+    # Vérifier si le créneau n'est plus disponible
+    busy_message = result.get("busy", "")
+    if busy_message or (not is_confirmed and not rdv_id):
+        return {
+            "success": False,
+            "erreur": "creneau_indisponible",
+            "message": "Ce créneau n'est plus disponible. Veuillez consulter les disponibilités à nouveau et choisir un autre créneau.",
+            "details": result
+        }
+
     return {
         "success": True,
         "rdv_id": rdv_id,
-        "statut": "Confirmé" if is_confirmed else "En attente",
-        "message": f"Rendez-vous confirmé pour {request.prenom} {request.nom} le {request.date} à {request.heure[:2]}h{request.heure[2:]}." if is_confirmed else f"Rendez-vous en attente pour {request.prenom} {request.nom}.",
+        "statut": "Confirmé" if is_confirmed else "En attente de confirmation",
+        "message": f"Rendez-vous confirmé pour {request.prenom} {request.nom} le {request.date} à {request.heure[:2]}h{request.heure[2:]}." if is_confirmed else f"Rendez-vous créé pour {request.prenom} {request.nom}, en attente de confirmation.",
         "details": result
     }
 
