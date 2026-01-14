@@ -601,11 +601,15 @@ async def creer_rdv(
     endpoint = f"/schedules/{request.praticien_id}/slots/{request.type_rdv}/{request.date}/{request.heure}/"
     result = await call_rdvdentiste("PUT", endpoint, office_code, api_key, params)
 
+    # Vérifier si le RDV est confirmé directement
+    is_confirmed = result.get("done", False)
+    rdv_id = result.get("rdvId") or result.get("idDemande")
+
     return {
         "success": True,
-        "rdv_id": result.get("appointmentRequestId"),
-        "statut": "En attente de confirmation",
-        "message": f"Rendez-vous créé pour {request.prenom} {request.nom} le {request.date} à {request.heure[:2]}h{request.heure[2:]}. En attente de confirmation par le praticien.",
+        "rdv_id": rdv_id,
+        "statut": "Confirmé" if is_confirmed else "En attente",
+        "message": f"Rendez-vous confirmé pour {request.prenom} {request.nom} le {request.date} à {request.heure[:2]}h{request.heure[2:]}." if is_confirmed else f"Rendez-vous en attente pour {request.prenom} {request.nom}.",
         "details": result
     }
 
