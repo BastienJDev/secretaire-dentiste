@@ -531,12 +531,18 @@ async def consulter_disponibilites(
 
     # Formater les créneaux pour une réponse claire
     creneaux_formates = []
-    if isinstance(result, list):
-        for slot in result:
+    # L'API retourne un objet avec "AvailableSlots" contenant la liste des créneaux
+    slots = result.get("AvailableSlots", []) if isinstance(result, dict) else result
+    for slot in slots:
+        # Extraire date et heure depuis le format ISO "2026-01-17T11:40:00"
+        start_time = slot.get("start", "")
+        if start_time:
+            date_part = start_time.split("T")[0]  # "2026-01-17"
+            time_part = start_time.split("T")[1][:5].replace(":", "")  # "1140"
             creneaux_formates.append({
-                "date": slot.get("date"),
-                "heure": slot.get("hour"),
-                "praticien": slot.get("practitioner"),
+                "date": date_part,
+                "heure": time_part,
+                "heure_format": start_time.split("T")[1][:5],  # "11:40"
                 "disponible": True
             })
 
