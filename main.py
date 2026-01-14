@@ -386,6 +386,13 @@ async def call_rdvdentiste(
                 except:
                     return {"Error": {"code": "notFound", "text": "Not found"}}
 
+            # Pour les erreurs 400, essayer de retourner le JSON (utile pour annulation)
+            if response.status_code == 400:
+                try:
+                    return response.json()
+                except:
+                    pass
+
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
@@ -698,60 +705,32 @@ async def annuler_rdv(
     else:
         endpoint = f"/schedules/{praticien_id}/appointment-requests/{rdv_id}"
 
-    try:
-        result = await call_rdvdentiste("DELETE", endpoint, office_code, api_key)
+    result = await call_rdvdentiste("DELETE", endpoint, office_code, api_key)
 
-        # Vérifier si déjà annulé
-        if isinstance(result, dict) and "error" in result:
-            error_msg = result.get("error", "")
-            if "already cancelled" in error_msg.lower():
-                return {
-                    "success": True,
-                    "rdv_id": request.rdv_id,
-                    "message": f"Le rendez-vous {request.rdv_id} était déjà annulé",
-                    "details": result
-                }
-
-        return {
-            "success": True,
-            "rdv_id": request.rdv_id,
-            "message": f"Le rendez-vous {request.rdv_id} a été annulé avec succès",
-            "details": result
-        }
-    except HTTPException as e:
-        # Si erreur 400, peut-être déjà annulé ou autre problème
-        if e.status_code == 400:
+    # Vérifier si déjà annulé (l'API retourne {"error": "..."} avec code 400)
+    if isinstance(result, dict) and "error" in result:
+        error_msg = result.get("error", "")
+        if "already cancelled" in error_msg.lower():
+            return {
+                "success": True,
+                "rdv_id": request.rdv_id,
+                "message": f"Le rendez-vous {request.rdv_id} était déjà annulé",
+                "details": result
+            }
+        else:
             return {
                 "success": False,
                 "rdv_id": request.rdv_id,
-                "message": "Impossible d'annuler ce rendez-vous. Il est peut-être déjà annulé ou n'existe pas.",
-                "erreur": str(e.detail)
+                "message": f"Erreur lors de l'annulation: {error_msg}",
+                "details": result
             }
 
-        # Si erreur 404, essayer l'autre endpoint
-        if e.status_code == 404:
-            if rdv_id.startswith("D"):
-                alt_endpoint = f"/schedules/{praticien_id}/appointment-requests/{rdv_id[1:]}"
-            else:
-                alt_endpoint = f"/schedules/{praticien_id}/appointments/D{rdv_id}"
-
-            try:
-                result = await call_rdvdentiste("DELETE", alt_endpoint, office_code, api_key)
-                return {
-                    "success": True,
-                    "rdv_id": request.rdv_id,
-                    "message": f"Le rendez-vous {request.rdv_id} a été annulé avec succès",
-                    "details": result
-                }
-            except:
-                pass
-
-        return {
-            "success": False,
-            "rdv_id": request.rdv_id,
-            "message": "Rendez-vous non trouvé ou impossible à annuler",
-            "erreur": str(e.detail)
-        }
+    return {
+        "success": True,
+        "rdv_id": request.rdv_id,
+        "message": f"Le rendez-vous {request.rdv_id} a été annulé avec succès",
+        "details": result
+    }
 
 
 # ============== ENDPOINT POUR TYPES DE RDV ==============
