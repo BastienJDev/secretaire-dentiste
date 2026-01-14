@@ -321,8 +321,8 @@ class ConsulterDisponibilitesRequest(BaseModel):
 
 
 class CreerRdvRequest(BaseModel):
-    praticien_id: str = Field(..., description="ID du praticien (scheduleId)")
-    type_rdv: str = Field(..., description="Type de rendez-vous")
+    praticien_id: Optional[str] = Field("MC", description="ID du praticien (scheduleId)")
+    type_rdv: str = Field(..., description="Type de rendez-vous (code numérique: 84, 27, etc.)")
     date: str = Field(..., description="Date du RDV (YYYY-MM-DD)")
     heure: str = Field(..., description="Heure du RDV (HHMM, ex: 0930)")
     nom: str = Field(..., description="Nom du patient")
@@ -566,6 +566,15 @@ async def creer_rdv(
     Crée un nouveau rendez-vous.
     Le RDV sera en attente de confirmation par le praticien.
     """
+    # Si pas de praticien_id, récupérer automatiquement
+    if not request.praticien_id:
+        schedules_response = await call_rdvdentiste("GET", "/schedules", office_code, api_key)
+        schedules = schedules_response.get("Schedules", [])
+        if schedules and len(schedules) > 0:
+            request.praticien_id = schedules[0].get("id")
+        else:
+            request.praticien_id = "MC"  # Fallback
+
     # Convertir les dates du format français si nécessaire
     request.date = convertir_date(request.date)
     if request.date_naissance:
