@@ -304,7 +304,7 @@ CATEGORIES_RDV = {
 # ============== MODÈLES PYDANTIC ==============
 
 class RechercherPatientRequest(BaseModel):
-    nom: str = Field(..., description="Nom de famille du patient")
+    nom: Optional[str] = Field(None, description="Nom de famille du patient")
     prenom: Optional[str] = Field(None, description="Prénom du patient")
     date_naissance: Optional[str] = Field(None, description="Date de naissance (YYYY-MM-DD)")
     telephone: Optional[str] = Field(None, description="Numéro de téléphone mobile")
@@ -667,12 +667,13 @@ async def voir_rdv_patient(
     rdvs_formates = []
     if isinstance(result, list):
         for rdv in result:
+            service_type = rdv.get("service_type", {})
             rdvs_formates.append({
-                "id": rdv.get("id"),
+                "id": rdv.get("rdvId") or rdv.get("id"),
                 "date": rdv.get("date"),
-                "heure": rdv.get("hour"),
-                "type": rdv.get("type"),
-                "praticien": rdv.get("practitioner"),
+                "heure": rdv.get("start") or rdv.get("hour"),
+                "type": service_type.get("display") if isinstance(service_type, dict) else rdv.get("type"),
+                "duree_minutes": rdv.get("duration"),
                 "statut": rdv.get("status", "Confirmé")
             })
 
@@ -695,22 +696,27 @@ async def annuler_rdv(
     Annule un rendez-vous existant.
     L'ID peut être au format D123456 (appointment) ou juste 123456 (request).
     """
-    praticien_id = request.praticien_id or "MC"
     rdv_id = request.rdv_id
+    praticien_id = request.praticien_id or "MC"
 
     # Si l'ID commence par D, c'est un appointment confirmé
     # Sinon c'est une demande (request)
-    if rdv_id.startswith("D"):
-        endpoint = f"/schedules/{praticien_id}/appointments/{rdv_id}"
+    if rdv_id.upper().startswith("D"):
+        endpoint = f"/schedules/{praticien_id}/appointments/{rdv_id}/"
     else:
-        endpoint = f"/schedules/{praticien_id}/appointment-requests/{rdv_id}"
+        endpoint = f"/schedules/{praticien_id}/appointment-requests/{rdv_id}/"
 
     result = await call_rdvdentiste("DELETE", endpoint, office_code, api_key)
 
-    # Vérifier si déjà annulé (l'API retourne {"error": "..."} avec code 400)
-    if isinstance(result, dict) and "error" in result:
-        error_msg = result.get("error", "")
-        if "already cancelled" in error_msg.lower():
+    # Vérifier si erreur (l'API peut retourner "error" ou "Error")
+    error_msg = None
+    if isinstance(result, dict):
+        error_msg = result.get("error") or result.get("Error")
+        if isinstance(error_msg, dict):
+            error_msg = error_msg.get("text") or error_msg.get("message") or str(error_msg)
+
+    if error_msg:
+        if "already cancelled" in str(error_msg).lower() or "déjà annulé" in str(error_msg).lower():
             return {
                 "success": True,
                 "rdv_id": request.rdv_id,
