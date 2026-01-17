@@ -814,14 +814,13 @@ async def modifier_rdv(
         else:
             praticien_id = "MC"  # Fallback
 
-    # Créer le nouveau RDV avec cancelPrevious=1 pour annuler automatiquement l'ancien
-    # L'API rdvdentiste gère elle-même la détection de redondance et l'annulation
+    # Créer le nouveau RDV - d'abord sans cancelPrevious pour détecter la redondance
+    # Si redondance détectée et cancellable=true, on réessaie avec cancelPrevious=1
     create_params = {
         "firstName": request.prenom,
         "lastName": request.nom,
         "mobile": telephone,
-        "newPatient": "0",  # Patient existant puisqu'il modifie un RDV
-        "cancelPrevious": "1"  # Annuler automatiquement les RDVs existants en redondance
+        "newPatient": "0"  # Patient existant puisqu'il modifie un RDV
     }
     if request.email:
         create_params["email"] = request.email
@@ -833,22 +832,28 @@ async def modifier_rdv(
         create_params["messagePatient"] = request.message
 
     create_endpoint = f"/schedules/{praticien_id}/slots/{request.type_rdv}/{nouvelle_date}/{request.nouvelle_heure}/"
+
+    # Première tentative sans cancelPrevious pour voir s'il y a redondance
     create_result = await call_rdvdentiste("PUT", create_endpoint, office_code, api_key, create_params)
 
-    # Vérifier si le nouveau créneau est disponible
-    busy_message = create_result.get("busy", "")
-    is_confirmed = create_result.get("done", False)
-    new_rdv_id = create_result.get("rdvId") or create_result.get("idDemande")
-
-    # Si redondance détectée mais non annulable, retourner une erreur explicite
+    # Si redondance détectée, réessayer avec cancelPrevious
     if isinstance(create_result, dict) and create_result.get("redondance"):
-        if not create_result.get("cancellable"):
+        if create_result.get("cancellable"):
+            # L'API indique qu'on peut annuler le RDV existant - réessayer avec cancelPrevious
+            create_params["cancelPrevious"] = "1"
+            create_result = await call_rdvdentiste("PUT", create_endpoint, office_code, api_key, create_params)
+        else:
             return {
                 "success": False,
                 "erreur": "redondance_non_annulable",
                 "message": "Un RDV existe déjà pour ce patient mais ne peut pas être annulé automatiquement. Veuillez d'abord annuler manuellement le RDV existant.",
                 "details": create_result
             }
+
+    # Vérifier si le nouveau créneau est disponible
+    busy_message = create_result.get("busy", "")
+    is_confirmed = create_result.get("done", False)
+    new_rdv_id = create_result.get("rdvId") or create_result.get("idDemande")
 
     if busy_message or (not is_confirmed and not new_rdv_id):
         return {

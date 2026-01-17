@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash($body = @{ type_rdv = \"84\" date_debut = \"2026-01-20\" date_fin = \"2026-01-31\" })",
+      "Bash(ConvertTo-Json)",
+      "Bash(Invoke-RestMethod -Uri \"https://web-production-8fbfc.up.railway.app/consulter_disponibilites\" -Method POST -Body $body -ContentType \"application/json\")",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []
