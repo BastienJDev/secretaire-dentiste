@@ -10,6 +10,7 @@ import httpx
 from datetime import datetime, timedelta
 import re
 import os
+import asyncio
 
 
 def normaliser_telephone(telephone: str) -> str:
@@ -836,6 +837,9 @@ async def modifier_rdv(
             "message": f"Impossible d'annuler l'ancien RDV: {error_msg}",
             "details": cancel_result
         }
+
+    # Attendre que l'API synchronise l'annulation avant de créer le nouveau RDV
+    await asyncio.sleep(2)
 
     # Étape 2: Créer le nouveau RDV
     create_params = {
