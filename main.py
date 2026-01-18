@@ -336,17 +336,21 @@ async def annuler_rdv(
         }
 
     # Chercher un RDV actif à annuler
+    # Statuts considérés comme "actifs" (non annulés)
+    statuts_annules = ["cancelled", "canceled", "annulé", "annule"]
     rdv_a_annuler = None
     for patient in patients:
         rdvs = await trouver_rdvs_patient(patient["id"], office_code, api_key)
         for rdv in rdvs:
-            if rdv.get("statut") == "active":
+            statut = (rdv.get("statut") or "").lower()
+            # Accepter tout RDV qui n'est pas explicitement annulé
+            if statut not in statuts_annules:
                 if date_cible:
                     if rdv.get("date") == date_cible:
                         rdv_a_annuler = rdv
                         break
                 else:
-                    # Prendre le premier RDV actif
+                    # Prendre le premier RDV non-annulé
                     rdv_a_annuler = rdv
                     break
         if rdv_a_annuler:
@@ -379,8 +383,9 @@ async def annuler_rdv(
     if error_msg:
         if "already cancelled" in str(error_msg).lower() or "déjà annulé" in str(error_msg).lower():
             return {
-                "success": True,
-                "message": f"Ce rendez-vous du {rdv_a_annuler['date']} était déjà annulé."
+                "success": False,
+                "already_cancelled": True,
+                "message": f"Ce rendez-vous du {rdv_a_annuler['date']} est déjà annulé."
             }
         return {
             "success": False,
