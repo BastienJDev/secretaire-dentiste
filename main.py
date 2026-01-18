@@ -718,6 +718,85 @@ async def debug_rdvs_raw(
     return {"raw_response": result}
 
 
+@app.post("/debug/annulation_complete")
+async def debug_annulation_complete(
+    request: AnnulerRdvRequest,
+    office_code: str = Header(default=DEFAULT_OFFICE_CODE, alias="X-Office-Code"),
+    api_key: Optional[str] = Header(default=None, alias="X-Api-Key")
+):
+    """
+    DEBUG: Montre toute la chaîne d'annulation avec les données brutes.
+    Permet de diagnostiquer pourquoi l'annulation échoue.
+    """
+    telephone = normaliser_telephone(request.telephone)
+    debug_info = {
+        "etape_1_telephone": telephone,
+        "etape_2_patients": [],
+        "etape_3_rdvs_bruts": [],
+        "etape_4_rdv_selectionne": None,
+        "etape_5_endpoint_utilise": None,
+        "etape_6_reponse_annulation": None
+    }
+
+    # Étape 2: Trouver les patients
+    patients = await trouver_patients_par_telephone(telephone, office_code, api_key)
+    debug_info["etape_2_patients"] = patients
+
+    if not patients:
+        return {"debug": debug_info, "erreur": "Aucun patient trouvé"}
+
+    # Étape 3: Récupérer les RDV bruts de chaque patient
+    for patient in patients:
+        raw_rdvs = await call_rdvdentiste(
+            "GET", f"/patients/{patient['id']}/appointments", office_code, api_key
+        )
+        debug_info["etape_3_rdvs_bruts"].append({
+            "patient_id": patient["id"],
+            "patient_nom": f"{patient.get('prenom', '')} {patient.get('nom', '')}",
+            "rdvs_raw": raw_rdvs
+        })
+
+    # Étape 4: Sélectionner le RDV à annuler (même logique que annuler_rdv)
+    date_cible = convertir_date(request.date_rdv) if request.date_rdv else None
+    statuts_annules = ["cancelled", "canceled", "annulé", "annule"]
+    rdv_a_annuler = None
+
+    for patient in patients:
+        rdvs = await trouver_rdvs_patient(patient["id"], office_code, api_key)
+        for rdv in rdvs:
+            statut = (rdv.get("statut") or "").lower()
+            if statut not in statuts_annules:
+                if date_cible:
+                    if rdv.get("date") == date_cible:
+                        rdv_a_annuler = rdv
+                        break
+                else:
+                    rdv_a_annuler = rdv
+                    break
+        if rdv_a_annuler:
+            break
+
+    debug_info["etape_4_rdv_selectionne"] = rdv_a_annuler
+
+    if not rdv_a_annuler:
+        return {"debug": debug_info, "erreur": "Aucun RDV actif trouvé à annuler"}
+
+    # Étape 5: Déterminer l'endpoint
+    rdv_id = rdv_a_annuler["id"]
+    if rdv_id.upper().startswith("D"):
+        endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/appointments/{rdv_id}/"
+    else:
+        endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/appointment-requests/{rdv_id}/"
+
+    debug_info["etape_5_endpoint_utilise"] = endpoint
+
+    # Étape 6: Tenter l'annulation
+    result = await call_rdvdentiste("DELETE", endpoint, office_code, api_key)
+    debug_info["etape_6_reponse_annulation"] = result
+
+    return {"debug": debug_info}
+
+
 # ============== ENDPOINTS LEGACY (compatibilité) ==============
 
 @app.post("/voir_rdv_patient")
