@@ -319,7 +319,12 @@ async def annuler_rdv(
     Dans Synthflow, utiliser {user_phone_number} pour le téléphone.
     """
     telephone = normaliser_telephone(request.telephone)
-    date_cible = convertir_date(request.date_rdv) if request.date_rdv else None
+
+    # Ignorer date_rdv si c'est une variable non remplacée ou vide
+    date_rdv_raw = request.date_rdv
+    if date_rdv_raw and (date_rdv_raw.startswith("<") or date_rdv_raw.startswith("{") or date_rdv_raw == ""):
+        date_rdv_raw = None
+    date_cible = convertir_date(date_rdv_raw) if date_rdv_raw else None
 
     # Trouver tous les patients avec ce numéro
     patients = await trouver_patients_par_telephone(telephone, office_code, api_key)
