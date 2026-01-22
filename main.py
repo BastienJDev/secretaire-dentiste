@@ -188,10 +188,12 @@ async def trouver_rdvs_patient(patient_id: str, office_code: str, api_key: Optio
         for rdv in result:
             service_type = rdv.get("service_type", {})
             rdv_id = rdv.get("rdvId") or rdv.get("id")
+            alternate_id = rdv.get("alternateRdvId")
             rdv_status = rdv.get("status", "active")  # Valeur par défaut "active" (pas "Confirmé")
-            print(f"[TROUVER_RDVS] RDV trouvé: id={rdv_id}, status={rdv_status}, raw={rdv}")
+            print(f"[TROUVER_RDVS] RDV trouvé: id={rdv_id}, alternate_id={alternate_id}, status={rdv_status}, raw={rdv}")
             rdvs.append({
                 "id": rdv_id,
+                "alternate_id": alternate_id,
                 "patient_id": patient_id,
                 "date": rdv.get("date"),
                 "heure": rdv.get("start") or rdv.get("hour"),
@@ -389,64 +391,87 @@ async def annuler_rdv(
         return {"success": False, "message": msg}
 
     rdv_id = rdv_a_annuler["id"]
+    alternate_id = rdv_a_annuler.get("alternate_id")
     rdv_statut_original = rdv_a_annuler.get("statut")
 
     # Log pour debug
-    print(f"[ANNULER_RDV] RDV trouvé: id={rdv_id}, statut={rdv_statut_original}, date={rdv_a_annuler.get('date')}")
+    print(f"[ANNULER_RDV] RDV trouvé: id={rdv_id}, alternate_id={alternate_id}, statut={rdv_statut_original}, date={rdv_a_annuler.get('date')}")
 
-    # Déterminer le bon endpoint selon le préfixe de l'ID:
-    # - "C" ou "D" = demande en attente → /appointment-requests/
-    # - Autres (ex: numérique) = RDV confirmé → /appointments/
-    if rdv_id.upper().startswith("C") or rdv_id.upper().startswith("D"):
-        endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/appointment-requests/{rdv_id}/"
-    else:
-        endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/appointments/{rdv_id}/"
+    # Construire la liste des endpoints à essayer (on essaie plusieurs combinaisons)
+    endpoints_a_essayer = []
 
-    print(f"[ANNULER_RDV] Endpoint utilisé: DELETE {endpoint}")
+    # Avec rdvId
+    endpoints_a_essayer.append(f"/schedules/{DEFAULT_PRATICIEN_ID}/appointment-requests/{rdv_id}/")
+    endpoints_a_essayer.append(f"/schedules/{DEFAULT_PRATICIEN_ID}/appointments/{rdv_id}/")
 
-    # Appeler l'API pour annuler
-    result = await call_rdvdentiste("DELETE", endpoint, office_code, api_key)
+    # Avec alternateRdvId si disponible
+    if alternate_id:
+        endpoints_a_essayer.append(f"/schedules/{DEFAULT_PRATICIEN_ID}/appointment-requests/{alternate_id}/")
+        endpoints_a_essayer.append(f"/schedules/{DEFAULT_PRATICIEN_ID}/appointments/{alternate_id}/")
 
-    print(f"[ANNULER_RDV] Réponse API DELETE: {result}")
+    print(f"[ANNULER_RDV] Endpoints à essayer: {endpoints_a_essayer}")
 
-    # Vérifier le résultat
-    error_msg = None
-    if isinstance(result, dict):
-        error_msg = result.get("error") or result.get("Error")
-        if isinstance(error_msg, dict):
-            error_msg = error_msg.get("text") or error_msg.get("message") or str(error_msg)
+    # Essayer chaque endpoint jusqu'à ce que l'annulation fonctionne
+    derniere_erreur = None
+    annulation_reussie = False
 
-    if error_msg:
-        if "already cancelled" in str(error_msg).lower() or "déjà annulé" in str(error_msg).lower():
-            return {
-                "success": True,
-                "message": f"Ce rendez-vous du {rdv_a_annuler['date']} était déjà annulé."
-            }
+    for endpoint in endpoints_a_essayer:
+        print(f"[ANNULER_RDV] Tentative DELETE {endpoint}")
+        result = await call_rdvdentiste("DELETE", endpoint, office_code, api_key)
+        print(f"[ANNULER_RDV] Réponse API DELETE: {result}")
+
+        # Vérifier si erreur
+        error_msg = None
+        if isinstance(result, dict):
+            error_msg = result.get("error") or result.get("Error")
+            if isinstance(error_msg, dict):
+                error_msg = error_msg.get("text") or error_msg.get("message") or str(error_msg)
+
+        if error_msg:
+            print(f"[ANNULER_RDV] Erreur sur cet endpoint: {error_msg}")
+            derniere_erreur = error_msg
+            # Continuer à essayer les autres endpoints
+            continue
+
+        # Pas d'erreur, vérifier si le RDV est vraiment annulé
+        await asyncio.sleep(0.5)  # Petite pause pour laisser l'API propager
+
+        rdvs_apres = await trouver_rdvs_patient(rdv_a_annuler["patient_id"], office_code, api_key)
+        rdv_encore_actif = any(
+            r.get("id") == rdv_id and r.get("statut") == "active"
+            for r in rdvs_apres
+        )
+
+        print(f"[ANNULER_RDV] Après {endpoint}: RDV encore actif = {rdv_encore_actif}")
+
+        if not rdv_encore_actif:
+            print(f"[ANNULER_RDV] ✅ Annulation réussie avec {endpoint}")
+            annulation_reussie = True
+            break
+        else:
+            print(f"[ANNULER_RDV] ❌ RDV toujours actif, on essaie le prochain endpoint...")
+
+    # Résultat final
+    if annulation_reussie:
         return {
-            "success": False,
-            "message": f"Erreur lors de l'annulation: {error_msg}"
+            "success": True,
+            "rdv_id": rdv_id,
+            "date": rdv_a_annuler["date"],
+            "heure": rdv_a_annuler["heure"],
+            "message": f"Votre rendez-vous du {rdv_a_annuler['date']} à {rdv_a_annuler['heure']} a bien été annulé."
         }
 
-    # VÉRIFICATION POST-ANNULATION: Le RDV existe-t-il encore ?
-    await asyncio.sleep(1)  # Attendre 1 seconde pour laisser l'API propager
+    # Aucun endpoint n'a fonctionné
+    if derniere_erreur and ("already cancelled" in str(derniere_erreur).lower() or "déjà annulé" in str(derniere_erreur).lower()):
+        return {
+            "success": True,
+            "message": f"Ce rendez-vous du {rdv_a_annuler['date']} était déjà annulé."
+        }
 
-    rdvs_apres = await trouver_rdvs_patient(rdv_a_annuler["patient_id"], office_code, api_key)
-    rdv_encore_actif = any(
-        r.get("id") == rdv_id and r.get("statut") == "active"
-        for r in rdvs_apres
-    )
-    print(f"[ANNULER_RDV] VÉRIFICATION POST-ANNULATION: RDV {rdv_id} encore actif = {rdv_encore_actif}")
-    print(f"[ANNULER_RDV] RDVs après annulation: {rdvs_apres}")
-
-    if rdv_encore_actif:
-        print(f"[ANNULER_RDV] ⚠️ BUG DÉTECTÉ: Le RDV {rdv_id} est toujours actif après DELETE!")
-
+    print(f"[ANNULER_RDV] ⚠️ ÉCHEC: Aucun endpoint n'a réussi à annuler le RDV {rdv_id}")
     return {
-        "success": True,
-        "rdv_id": rdv_id,
-        "date": rdv_a_annuler["date"],
-        "heure": rdv_a_annuler["heure"],
-        "message": f"Votre rendez-vous du {rdv_a_annuler['date']} à {rdv_a_annuler['heure']} a bien été annulé."
+        "success": False,
+        "message": f"Impossible d'annuler le rendez-vous. Veuillez contacter le cabinet directement."
     }
 
 
