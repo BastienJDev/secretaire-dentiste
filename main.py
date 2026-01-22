@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel, Field
 from typing import Optional, List
 import httpx
+import asyncio
 from datetime import datetime, timedelta
 import re
 import os
@@ -394,9 +395,9 @@ async def annuler_rdv(
     print(f"[ANNULER_RDV] RDV trouvé: id={rdv_id}, statut={rdv_statut_original}, date={rdv_a_annuler.get('date')}")
 
     # Déterminer le bon endpoint selon le préfixe de l'ID:
-    # - "C" = demande en attente → /appointment-requests/
-    # - Pas de préfixe ou "D" = RDV confirmé → /appointments/
-    if rdv_id.upper().startswith("C"):
+    # - "C" ou "D" = demande en attente → /appointment-requests/
+    # - Autres (ex: numérique) = RDV confirmé → /appointments/
+    if rdv_id.upper().startswith("C") or rdv_id.upper().startswith("D"):
         endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/appointment-requests/{rdv_id}/"
     else:
         endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/appointments/{rdv_id}/"
@@ -406,7 +407,7 @@ async def annuler_rdv(
     # Appeler l'API pour annuler
     result = await call_rdvdentiste("DELETE", endpoint, office_code, api_key)
 
-    print(f"[ANNULER_RDV] Réponse API: {result}")
+    print(f"[ANNULER_RDV] Réponse API DELETE: {result}")
 
     # Vérifier le résultat
     error_msg = None
@@ -425,6 +426,20 @@ async def annuler_rdv(
             "success": False,
             "message": f"Erreur lors de l'annulation: {error_msg}"
         }
+
+    # VÉRIFICATION POST-ANNULATION: Le RDV existe-t-il encore ?
+    await asyncio.sleep(1)  # Attendre 1 seconde pour laisser l'API propager
+
+    rdvs_apres = await trouver_rdvs_patient(rdv_a_annuler["patient_id"], office_code, api_key)
+    rdv_encore_actif = any(
+        r.get("id") == rdv_id and r.get("statut") == "active"
+        for r in rdvs_apres
+    )
+    print(f"[ANNULER_RDV] VÉRIFICATION POST-ANNULATION: RDV {rdv_id} encore actif = {rdv_encore_actif}")
+    print(f"[ANNULER_RDV] RDVs après annulation: {rdvs_apres}")
+
+    if rdv_encore_actif:
+        print(f"[ANNULER_RDV] ⚠️ BUG DÉTECTÉ: Le RDV {rdv_id} est toujours actif après DELETE!")
 
     return {
         "success": True,
