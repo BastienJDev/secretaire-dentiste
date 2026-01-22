@@ -514,14 +514,29 @@ async def creer_rdv(
         params["messagePatient"] = request.message
 
     endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/slots/{request.type_rdv}/{date}/{request.heure}/"
+
+    print(f"[CREER_RDV] Endpoint: PUT {endpoint}")
+    print(f"[CREER_RDV] Params: {params}")
+
     result = await call_rdvdentiste("PUT", endpoint, office_code, api_key, params)
+
+    print(f"[CREER_RDV] Réponse API: {result}")
 
     # Vérifier le résultat
     is_confirmed = result.get("done", False)
     rdv_id = result.get("rdvId") or result.get("idDemande")
     busy_message = result.get("busy", "")
+    error_msg = result.get("error") or result.get("Error")
+
+    if error_msg:
+        print(f"[CREER_RDV] Erreur API: {error_msg}")
+        return {
+            "success": False,
+            "message": f"Erreur lors de la création: {error_msg}"
+        }
 
     if busy_message or (not is_confirmed and not rdv_id):
+        print(f"[CREER_RDV] Créneau non disponible - busy={busy_message}, done={is_confirmed}, rdvId={rdv_id}")
         return {
             "success": False,
             "message": "Ce créneau n'est plus disponible. Veuillez en choisir un autre."
