@@ -61,6 +61,133 @@ def est_rdv_annule(rdv_id: str) -> bool:
     return rdv_id in charger_rdv_annules()
 
 
+# ============== PLAGES HORAIRES PAR TYPE DE RDV ==============
+
+# Mapping des catégories avec leurs mots-clés et plages horaires
+# Jours: 0=Lundi, 1=Mardi, 2=Mercredi, 3=Jeudi, 4=Vendredi, 5=Samedi, 6=Dimanche
+PLAGES_HORAIRES = {
+    "CONSULTATION_URGENCE_BILAN": {
+        "mots_cles": ["URGENCE", "BILAN", "CONSULTATION"],
+        "plages": {
+            0: [("09:30", "14:00")],  # Lundi
+            1: [("17:00", "19:30")],  # Mardi
+            3: [("17:00", "19:30")],  # Jeudi
+            4: [("09:30", "14:00")],  # Vendredi
+            5: [("09:00", "15:00")],  # Samedi
+        }
+    },
+    "DETARTRAGE_MAINTENANCE": {
+        "mots_cles": ["DETARTRAGE", "MAINTENANCE", "PROPHYLAXIE"],
+        "plages": {
+            0: [("09:30", "14:00")],  # Lundi
+            1: [("17:00", "19:30")],  # Mardi
+            4: [("09:30", "14:00")],  # Vendredi
+            5: [("09:00", "15:00")],  # Samedi
+        }
+    },
+    "FACETTES_PROTHESE_POSE": {
+        "mots_cles": ["FACETTE", "PROTHESE", "INLAY", "EVALUATION", "PHOTO", "ESSAYAGE",
+                     "SOINS CONSERVATEURS", "COMPOSITE", "ECLAIRCISSEMENT"],
+        "plages": {
+            0: [("14:00", "19:30")],  # Lundi
+            1: [("09:30", "17:00")],  # Mardi
+            3: [("09:30", "19:30")],  # Jeudi
+            4: [("14:00", "19:30")],  # Vendredi
+        }
+    },
+    "LITHOTRITIE": {
+        "mots_cles": ["LITHOTRITIE"],
+        "plages": {
+            0: [("09:30", "14:00")],  # Lundi
+            1: [("17:00", "19:30")],  # Mardi
+            4: [("09:30", "14:00")],  # Vendredi
+        }
+    },
+    "INVISALIGN": {
+        "mots_cles": ["INVISALIGN", "CONTENTION", "FIL NUMERIC", "ORTHO"],
+        "plages": {
+            0: [("18:00", "19:30")],  # Lundi
+            1: [("09:30", "12:00")],  # Mardi
+            3: [("09:30", "11:00"), ("18:00", "19:30")],  # Jeudi (2 plages)
+            4: [("18:00", "19:30")],  # Vendredi
+        }
+    },
+    "CHIRURGIE": {
+        "mots_cles": ["EXTRACTION", "IMPLANT", "GREFFE", "RESECTION", "APICALE"],
+        "plages": {
+            # À confirmer - pour l'instant on autorise tout
+            0: [("09:00", "19:30")],
+            1: [("09:00", "19:30")],
+            2: [("09:00", "19:30")],
+            3: [("09:00", "19:30")],
+            4: [("09:00", "19:30")],
+            5: [("09:00", "15:00")],
+        }
+    },
+}
+
+
+def trouver_categorie_rdv(type_rdv_nom: str) -> str:
+    """Trouve la catégorie d'un type de RDV basé sur son nom"""
+    if not type_rdv_nom:
+        return None
+
+    type_upper = type_rdv_nom.upper()
+
+    for categorie, config in PLAGES_HORAIRES.items():
+        for mot_cle in config["mots_cles"]:
+            if mot_cle in type_upper:
+                return categorie
+
+    return None  # Type non trouvé dans le mapping
+
+
+def est_creneau_autorise(type_rdv_nom: str, date_str: str, heure_str: str) -> bool:
+    """
+    Vérifie si un créneau est autorisé pour un type de RDV donné.
+
+    Args:
+        type_rdv_nom: Nom du type de RDV (ex: "URGENCE", "CONSULTATION")
+        date_str: Date au format YYYY-MM-DD
+        heure_str: Heure au format HH:MM ou HHMM
+
+    Returns:
+        True si le créneau est autorisé, False sinon
+    """
+    categorie = trouver_categorie_rdv(type_rdv_nom)
+
+    if not categorie:
+        # Type inconnu, on autorise par défaut
+        print(f"[PLAGES] Type '{type_rdv_nom}' non mappé, créneau autorisé par défaut")
+        return True
+
+    # Parser la date pour obtenir le jour de la semaine
+    try:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+        jour_semaine = date_obj.weekday()  # 0=Lundi, 6=Dimanche
+    except ValueError:
+        print(f"[PLAGES] Date invalide: {date_str}")
+        return True  # En cas d'erreur, on autorise
+
+    # Normaliser l'heure en HH:MM
+    if len(heure_str) == 4 and ":" not in heure_str:
+        heure_str = f"{heure_str[:2]}:{heure_str[2:]}"
+
+    # Vérifier si le jour est autorisé
+    plages_jour = PLAGES_HORAIRES[categorie]["plages"].get(jour_semaine)
+    if not plages_jour:
+        print(f"[PLAGES] {type_rdv_nom} -> {categorie}: jour {jour_semaine} non autorisé")
+        return False
+
+    # Vérifier si l'heure est dans une des plages
+    for debut, fin in plages_jour:
+        if debut <= heure_str <= fin:
+            return True
+
+    print(f"[PLAGES] {type_rdv_nom} -> {categorie}: heure {heure_str} hors plages {plages_jour}")
+    return False
+
+
 # ============== FONCTIONS UTILITAIRES ==============
 
 def normaliser_telephone(telephone: str) -> str:
@@ -268,6 +395,7 @@ class AnnulerRdvRequest(BaseModel):
 # --- Consulter Disponibilités ---
 class DisponibilitesRequest(BaseModel):
     type_rdv: str = Field(..., description="Code du type de RDV (ex: 84, 27)")
+    type_rdv_nom: Optional[str] = Field(None, description="Nom du type de RDV (ex: URGENCE, CONSULTATION) - pour filtrer les plages horaires")
     date_debut: str = Field(..., description="Date de début (YYYY-MM-DD ou JJ/MM/AAAA)")
     date_fin: Optional[str] = Field(None, description="Date de fin (par défaut +7 jours)")
     nouveau_patient: Optional[bool] = Field(False, description="Est-ce un nouveau patient ?")
@@ -276,6 +404,7 @@ class DisponibilitesRequest(BaseModel):
 # --- Créer RDV ---
 class CreerRdvRequest(BaseModel):
     type_rdv: str = Field(..., description="Code du type de RDV")
+    type_rdv_nom: Optional[str] = Field(None, description="Nom du type de RDV (ex: URGENCE) - pour valider les plages horaires")
     date: str = Field(..., description="Date du RDV (YYYY-MM-DD ou JJ/MM/AAAA)")
     heure: str = Field(..., description="Heure du RDV (format HHMM, ex: 0930 pour 9h30)")
     nom: str = Field(..., description="Nom du patient")
@@ -551,6 +680,7 @@ async def consulter_disponibilites(
 
     # Parser les créneaux
     creneaux = []
+    creneaux_filtres = 0
     slots = result.get("AvailableSlots", []) if isinstance(result, dict) else result
 
     for slot in slots:
@@ -559,15 +689,26 @@ async def consulter_disponibilites(
             date_part = start_time.split("T")[0]
             time_part = start_time.split("T")[1][:5]
             heure_code = time_part.replace(":", "")
+
+            # Filtrer selon les plages horaires si type_rdv_nom est fourni
+            if request.type_rdv_nom:
+                if not est_creneau_autorise(request.type_rdv_nom, date_part, time_part):
+                    creneaux_filtres += 1
+                    continue  # Créneau hors plage autorisée
+
             creneaux.append({
                 "date": date_part,
                 "heure": heure_code,
                 "heure_affichage": time_part.replace(":", "h")
             })
 
+    if request.type_rdv_nom and creneaux_filtres > 0:
+        print(f"[DISPONIBILITES] {creneaux_filtres} créneaux filtrés pour {request.type_rdv_nom}")
+
     return {
         "success": True,
         "type_rdv": request.type_rdv,
+        "type_rdv_nom": request.type_rdv_nom,
         "periode": f"Du {date_debut} au {date_fin}",
         "creneaux": creneaux,
         "nombre_creneaux": len(creneaux),
@@ -591,6 +732,16 @@ async def creer_rdv(
     date = convertir_date(request.date)
     date_naissance = convertir_date(request.date_naissance) if request.date_naissance else None
     telephone = normaliser_telephone(request.telephone)
+
+    # Valider les plages horaires si type_rdv_nom est fourni
+    if request.type_rdv_nom:
+        if not est_creneau_autorise(request.type_rdv_nom, date, request.heure):
+            categorie = trouver_categorie_rdv(request.type_rdv_nom)
+            print(f"[CREER_RDV] Créneau refusé: {request.type_rdv_nom} ({categorie}) le {date} à {request.heure}")
+            return {
+                "success": False,
+                "message": f"Ce créneau n'est pas disponible pour ce type de rendez-vous. Veuillez choisir un autre horaire."
+            }
 
     params = {
         "firstName": request.prenom,
