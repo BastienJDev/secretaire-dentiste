@@ -151,8 +151,9 @@ async def trouver_patients_par_telephone(telephone: str, office_code: str, api_k
     )
 
     patients = []
-    if isinstance(search_result, dict) and "Patients" in search_result:
-        for patient in search_result.get("Patients", []):
+    # L'API retourne "People" (pas "Patients")
+    if isinstance(search_result, dict) and "People" in search_result:
+        for patient in search_result.get("People", []):
             patient_id = patient.get("identifier") or patient.get("id")
             if patient_id:
                 patients.append({
@@ -180,7 +181,7 @@ async def trouver_rdvs_patient(patient_id: str, office_code: str, api_key: Optio
                 "heure": rdv.get("start") or rdv.get("hour"),
                 "type": service_type.get("display") if isinstance(service_type, dict) else rdv.get("type"),
                 "duree_minutes": rdv.get("duration"),
-                "statut": rdv.get("status", "Confirmé")
+                "statut": rdv.get("status", "active")
             })
 
     return rdvs
@@ -355,11 +356,13 @@ async def annuler_rdv(
 
     rdv_id = rdv_a_annuler["id"]
 
-    # Déterminer le bon endpoint (appointment vs appointment-request)
-    if rdv_id.upper().startswith("D"):
-        endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/appointments/{rdv_id}/"
-    else:
+    # Déterminer le bon endpoint selon le préfixe de l'ID:
+    # - "C" = demande en attente → /appointment-requests/
+    # - Pas de préfixe ou "D" = RDV confirmé → /appointments/
+    if rdv_id.upper().startswith("C"):
         endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/appointment-requests/{rdv_id}/"
+    else:
+        endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/appointments/{rdv_id}/"
 
     # Appeler l'API pour annuler
     result = await call_rdvdentiste("DELETE", endpoint, office_code, api_key)
@@ -546,8 +549,9 @@ async def rechercher_patient(
         }
 
     patients = []
-    if isinstance(result, dict) and "Patients" in result:
-        for p in result.get("Patients", []):
+    # L'API retourne "People" (pas "Patients")
+    if isinstance(result, dict) and "People" in result:
+        for p in result.get("People", []):
             patient_id = p.get("identifier") or p.get("id")
             patients.append({
                 "id": patient_id,
