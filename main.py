@@ -63,6 +63,34 @@ def est_rdv_annule(rdv_id: str) -> bool:
 
 # ============== PLAGES HORAIRES PAR TYPE DE RDV ==============
 
+# Mapping direct code -> catégorie (pour filtrage automatique sans avoir besoin du nom)
+CODE_TO_CATEGORIE = {
+    # CONSULTATION / URGENCE / BILAN
+    "84": "CONSULTATION_URGENCE_BILAN",  # URGENCE
+    "27": "CONSULTATION_URGENCE_BILAN",  # CONSULTATION
+    "37": "CONSULTATION_URGENCE_BILAN",  # BILAN CDC/ESTHETIQUE/ORTHO/PARO
+
+    # DETARTRAGE / MAINTENANCE
+    "45": "DETARTRAGE_MAINTENANCE",  # DETARTRAGE ET MAINTENANCE
+    "75": "DETARTRAGE_MAINTENANCE",  # SEANCE DE PROPHYLAXIE
+
+    # FACETTES / PROTHESE / POSE / EMPREINTE
+    "20": "FACETTES_PROTHESE_POSE",  # COLLAGE FACETTE
+    "21": "FACETTES_PROTHESE_POSE",  # INLAY IRM EMP OPTIQUE
+    "23": "FACETTES_PROTHESE_POSE",  # ECLAIRCISSEMENT FAUTEUIL
+    "30": "FACETTES_PROTHESE_POSE",  # PROTHESES DEPOSE/PREP/EMP/PROV
+    "36": "FACETTES_PROTHESE_POSE",  # SOINS CONSERVATEURS COMPOSITES ITK
+
+    # LITHOTRITIE
+    "46": "LITHOTRITIE",  # LITHOTRITIE
+
+    # INVISALIGN / ODF
+    "69": "INVISALIGN",  # FIN INVISALIGN
+
+    # CHIRURGIE (codes à confirmer)
+    "51": "CHIRURGIE",  # IMPLANT/GREFFE
+}
+
 # Mapping des catégories avec leurs mots-clés et plages horaires
 # Jours: 0=Lundi, 1=Mardi, 2=Mercredi, 3=Jeudi, 4=Vendredi, 5=Samedi, 6=Dimanche
 PLAGES_HORAIRES = {
@@ -659,15 +687,23 @@ async def consulter_disponibilites(
     🗓️ CONSULTER LES DISPONIBILITÉS
 
     Retourne les créneaux disponibles pour un type de RDV donné.
+    Filtre automatiquement les créneaux selon les plages horaires autorisées.
     """
     date_debut = convertir_date(request.date_debut)
 
-    # Date de fin par défaut: +7 jours
+    # Date de fin par défaut: +14 jours
     if request.date_fin:
         date_fin = convertir_date(request.date_fin)
     else:
         date_debut_obj = datetime.strptime(date_debut, "%Y-%m-%d")
-        date_fin = (date_debut_obj + timedelta(days=7)).strftime("%Y-%m-%d")
+        date_fin = (date_debut_obj + timedelta(days=14)).strftime("%Y-%m-%d")
+
+    # Déterminer la catégorie à partir du code OU du nom
+    categorie = CODE_TO_CATEGORIE.get(request.type_rdv)
+    if not categorie and request.type_rdv_nom:
+        categorie = trouver_categorie_rdv(request.type_rdv_nom)
+
+    print(f"[DISPONIBILITES] Type RDV: {request.type_rdv}, Catégorie: {categorie}")
 
     params = {
         "start": date_debut,
@@ -678,7 +714,7 @@ async def consulter_disponibilites(
     endpoint = f"/schedules/{DEFAULT_PRATICIEN_ID}/slots/{request.type_rdv}/"
     result = await call_rdvdentiste("GET", endpoint, office_code, api_key, params)
 
-    # Parser les créneaux
+    # Parser les créneaux avec filtrage strict par plages horaires
     creneaux = []
     creneaux_filtres = 0
     slots = result.get("AvailableSlots", []) if isinstance(result, dict) else result
@@ -690,11 +726,27 @@ async def consulter_disponibilites(
             time_part = start_time.split("T")[1][:5]
             heure_code = time_part.replace(":", "")
 
-            # Filtrer selon les plages horaires si type_rdv_nom est fourni
-            if request.type_rdv_nom:
-                if not est_creneau_autorise(request.type_rdv_nom, date_part, time_part):
+            # FILTRAGE STRICT: Appliquer si on a une catégorie (via code ou nom)
+            if categorie:
+                plages_categorie = PLAGES_HORAIRES.get(categorie, {}).get("plages", {})
+                date_obj = datetime.strptime(date_part, "%Y-%m-%d")
+                jour_semaine = date_obj.weekday()
+
+                # Vérifier si le jour est autorisé
+                if jour_semaine not in plages_categorie:
                     creneaux_filtres += 1
-                    continue  # Créneau hors plage autorisée
+                    continue
+
+                # Vérifier si l'heure est dans une des plages autorisées
+                heure_ok = False
+                for debut, fin in plages_categorie[jour_semaine]:
+                    if debut <= time_part <= fin:
+                        heure_ok = True
+                        break
+
+                if not heure_ok:
+                    creneaux_filtres += 1
+                    continue
 
             creneaux.append({
                 "date": date_part,
@@ -702,17 +754,19 @@ async def consulter_disponibilites(
                 "heure_affichage": time_part.replace(":", "h")
             })
 
-    if request.type_rdv_nom and creneaux_filtres > 0:
-        print(f"[DISPONIBILITES] {creneaux_filtres} créneaux filtrés pour {request.type_rdv_nom}")
+    if creneaux_filtres > 0:
+        print(f"[DISPONIBILITES] {creneaux_filtres} créneaux filtrés (hors plages autorisées pour {categorie})")
 
     return {
         "success": True,
         "type_rdv": request.type_rdv,
         "type_rdv_nom": request.type_rdv_nom,
+        "categorie": categorie,
         "periode": f"Du {date_debut} au {date_fin}",
         "creneaux": creneaux,
         "nombre_creneaux": len(creneaux),
-        "message": f"{len(creneaux)} créneaux disponibles." if creneaux else "Aucun créneau disponible sur cette période."
+        "creneaux_filtres": creneaux_filtres,
+        "message": f"{len(creneaux)} créneaux disponibles (filtrés selon plages horaires)." if creneaux else "Aucun créneau disponible sur cette période pour ce type de RDV."
     }
 
 
