@@ -882,7 +882,9 @@ async def lister_types_rdv(
     office_code: str = Header(default=DEFAULT_OFFICE_CODE, alias="X-Office-Code"),
     api_key: Optional[str] = Header(default=None, alias="X-Api-Key")
 ):
-    """Liste tous les types de RDV disponibles"""
+    """Liste tous les types de RDV disponibles avec leurs plages horaires"""
+    jours_semaine = {0: "Lundi", 1: "Mardi", 2: "Mercredi", 3: "Jeudi", 4: "Vendredi", 5: "Samedi", 6: "Dimanche"}
+
     result = await call_rdvdentiste("GET", "/schedules", office_code, api_key)
 
     types_rdv = []
@@ -912,11 +914,24 @@ async def lister_types_rdv(
                             duration = sub_ext.get("valueDuration", {}).get("time", {}).get("value")
 
                     if service_type:
+                        nom = service_type.get("display")
+                        # Trouver la catégorie et les plages horaires
+                        categorie = trouver_categorie_rdv(nom)
+                        plages_formatees = []
+
+                        if categorie:
+                            plages_categorie = PLAGES_HORAIRES.get(categorie, {}).get("plages", {})
+                            for jour, horaires in plages_categorie.items():
+                                for debut, fin in horaires:
+                                    plages_formatees.append(f"{jours_semaine[jour]}: {debut.replace(':', 'h')}-{fin.replace(':', 'h')}")
+
                         types_rdv.append({
                             "code": service_type.get("code"),
-                            "nom": service_type.get("display"),
+                            "nom": nom,
                             "duree_minutes": int(duration) if duration else None,
-                            "nouveau_patient_only": new_patient_only
+                            "nouveau_patient_only": new_patient_only,
+                            "categorie": categorie,
+                            "plages_horaires": plages_formatees
                         })
 
     return {
