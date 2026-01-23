@@ -25,7 +25,7 @@ app = FastAPI(
 
 RDVDENTISTE_BASE_URL = "https://www.rdvdentiste.net/api"
 DEFAULT_OFFICE_CODE = os.getenv("RDVDENTISTE_OFFICE_CODE", "0501463005IMZDB742BK")
-DEFAULT_API_KEY = os.getenv("RDVDENTISTE_API_KEY")
+DEFAULT_API_KEY = os.getenv("RDVDENTISTE_API_KEY", "DYND-457AD3+21ZDZX-sdm3ISX")
 DEFAULT_PRATICIEN_ID = "MC"
 
 # Fichier pour stocker les RDV annulés (car l'API rdvdentiste.net ne met pas à jour le statut)
