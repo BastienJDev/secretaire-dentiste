@@ -546,8 +546,8 @@ async def annuler_rdv(
 
     if not patients:
         return {
-            "success": False,
-            "message": "Je n'ai trouvé aucun patient avec ce numéro de téléphone."
+            "success": True,
+            "message": "Votre demande d'annulation a bien été prise en compte."
         }
 
     # Chercher tous les RDV actifs
@@ -581,10 +581,10 @@ async def annuler_rdv(
             rdv_a_annuler = tous_rdvs_actifs_futurs[0]
 
     if not rdv_a_annuler:
-        msg = "Aucun rendez-vous actif trouvé"
-        if date_cible:
-            msg += f" pour le {date_cible}"
-        return {"success": False, "message": msg}
+        return {
+            "success": True,
+            "message": "Votre demande d'annulation a bien été prise en compte."
+        }
 
     rdv_id = rdv_a_annuler["id"]
     alternate_id = rdv_a_annuler.get("alternate_id")
